@@ -3,22 +3,23 @@ from PIL import Image
 import os
 import uuid
 from datetime import datetime
+import csv
 
 app = Flask(__name__)
 UPLOAD_FOLDER = "uploads"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-# Simple in-memory counter to simulate user limits (reset daily)
+# In-memory counter to track per-IP limits (resets daily)
 user_limits = {}
 
 @app.route("/", methods=["GET", "POST"])
 def index():
     client_ip = request.remote_addr
     today = datetime.now().strftime('%Y-%m-%d')
-    user_data = user_limits.get(client_ip, {'date': today, 'count': 0, 'email_required': False})
+    user_data = user_limits.get(client_ip, {'date': today, 'count': 0, 'email_provided': False})
 
     if user_data['date'] != today:
-        user_data = {'date': today, 'count': 0, 'email_required': False}
+        user_data = {'date': today, 'count': 0, 'email_provided': False}
 
     if request.method == "POST":
         user_data['count'] += 1
@@ -61,6 +62,12 @@ def index():
 def signup():
     client_ip = request.remote_addr
     if request.method == "POST":
+        email = request.form.get("email")
+        # Save the email to CSV
+        with open("emails.csv", "a", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow([datetime.now().isoformat(), client_ip, email])
+
         user_data = user_limits.get(client_ip, {'date': datetime.now().strftime('%Y-%m-%d'), 'count': 0})
         user_data['email_provided'] = True
         user_limits[client_ip] = user_data
