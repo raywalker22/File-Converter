@@ -97,7 +97,7 @@ def signup():
 
 @app.route("/emails")
 def export_emails():
-    if request.args.get("admin") != "raysecret":
+    if request.args.get("admin") != "Myboy-abc-jkl-13":
         return "Unauthorized", 403
 
     with get_db_connection() as conn:
