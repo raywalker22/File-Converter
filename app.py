@@ -11,10 +11,12 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
 
+
 def get_db_connection():
     return psycopg2.connect(DATABASE_URL, sslmode='require')
 
-# Ensure the emails table exists
+
+# Ensure emails table exists
 with get_db_connection() as conn:
     with conn.cursor() as cur:
         cur.execute("""
@@ -27,8 +29,9 @@ with get_db_connection() as conn:
         """)
         conn.commit()
 
-# IP-based tracking
+# In-memory per-IP user limits
 user_limits = {}
+
 
 @app.route("/", methods=["GET", "POST"])
 def index():
@@ -51,9 +54,8 @@ def index():
 
         file = request.files.get("file")
         target_format = request.form.get("format", "jpg").lower()
-        valid_formats = ["jpg", "png", "webp", "pdf", "tiff"]
 
-        if target_format not in valid_formats:
+        if target_format not in ["jpg", "png", "webp", "pdf", "tiff"]:
             return f"Unsupported format: {target_format}"
 
         target_format_pillow = {
@@ -73,29 +75,39 @@ def index():
     user_limits[client_ip] = user_data
     return render_template("index.html")
 
+
 @app.route("/signup", methods=["GET", "POST"])
 def signup():
     client_ip = request.remote_addr
     if request.method == "POST":
         email = request.form.get("email")
         timestamp = datetime.now().isoformat()
-        with get_db_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "INSERT INTO emails (timestamp, ip, email) VALUES (%s, %s, %s)",
-                    (timestamp, client_ip, email)
-                )
-                conn.commit()
-        user_data = user_limits.get(client_ip, {'date': datetime.now().strftime('%Y-%m-%d'), 'count': 0})
-        user_data['email_provided'] = True
-        user_limits[client_ip] = user_data
+
+        if email:
+            try:
+                with get_db_connection() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            "INSERT INTO emails (timestamp, ip, email) VALUES (%s, %s, %s)",
+                            (timestamp, client_ip, email)
+                        )
+                        conn.commit()
+                user_data = user_limits.get(client_ip, {'date': datetime.now().strftime('%Y-%m-%d'), 'count': 0})
+                user_data['email_provided'] = True
+                user_limits[client_ip] = user_data
+            except Exception as e:
+                return f"Database error: {str(e)}"
         return redirect("/")
     return render_template("signup.html")
 
-@app.route("/admin/emails")
-def admin_emails():
-    with get_db_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute("SELECT timestamp, ip, email FROM emails ORDER BY timestamp DESC")
-            emails = cur.fetchall()
-    return render_template("admin_emails.html", emails=emails)
+
+@app.route("/emails")
+def view_emails():
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT timestamp, ip, email FROM emails ORDER BY id DESC")
+                rows = cur.fetchall()
+        return render_template("emails.html", rows=rows)
+    except Exception as e:
+        return f"Error fetching emails: {str(e)}"
