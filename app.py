@@ -9,7 +9,6 @@ app = Flask(__name__)
 UPLOAD_FOLDER = "uploads"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-# Securely load your PostgreSQL URL
 DATABASE_URL = os.environ.get("DATABASE_URL")
 
 def get_db_connection():
@@ -28,7 +27,7 @@ with get_db_connection() as conn:
         """)
         conn.commit()
 
-# In-memory limiter (per session IP)
+# IP-based tracking
 user_limits = {}
 
 @app.route("/", methods=["GET", "POST"])
@@ -92,3 +91,11 @@ def signup():
         user_limits[client_ip] = user_data
         return redirect("/")
     return render_template("signup.html")
+
+@app.route("/admin/emails")
+def admin_emails():
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT timestamp, ip, email FROM emails ORDER BY timestamp DESC")
+            emails = cur.fetchall()
+    return render_template("admin_emails.html", emails=emails)
