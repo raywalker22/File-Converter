@@ -1,30 +1,34 @@
-
-from flask import Flask, render_template, request, send_file, redirect
-from PIL import Image
 import os
 import uuid
 from datetime import datetime
-import sqlite3
+from flask import Flask, render_template, request, send_file, redirect
+from PIL import Image
+import psycopg2
 
 app = Flask(__name__)
 UPLOAD_FOLDER = "uploads"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-# SQLite setup
-DB_FILE = "emails.db"
-def init_db():
-    with sqlite3.connect(DB_FILE) as conn:
-        conn.execute("""
+# Securely load your PostgreSQL URL
+DATABASE_URL = os.environ.get("DATABASE_URL")
+
+def get_db_connection():
+    return psycopg2.connect(DATABASE_URL, sslmode='require')
+
+# Ensure the emails table exists
+with get_db_connection() as conn:
+    with conn.cursor() as cur:
+        cur.execute("""
             CREATE TABLE IF NOT EXISTS emails (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id SERIAL PRIMARY KEY,
                 timestamp TEXT,
                 ip TEXT,
                 email TEXT
             )
         """)
-init_db()
+        conn.commit()
 
-# In-memory counter to track per-IP limits (resets daily)
+# In-memory limiter (per session IP)
 user_limits = {}
 
 @app.route("/", methods=["GET", "POST"])
@@ -53,14 +57,11 @@ def index():
         if target_format not in valid_formats:
             return f"Unsupported format: {target_format}"
 
-        if target_format == "jpg":
-            target_format_pillow = "JPEG"
-        elif target_format == "pdf":
-            target_format_pillow = "PDF"
-        elif target_format == "tiff":
-            target_format_pillow = "TIFF"
-        else:
-            target_format_pillow = target_format.upper()
+        target_format_pillow = {
+            "jpg": "JPEG",
+            "pdf": "PDF",
+            "tiff": "TIFF"
+        }.get(target_format, target_format.upper())
 
         if file:
             img = Image.open(file.stream).convert("RGB")
@@ -79,8 +80,13 @@ def signup():
     if request.method == "POST":
         email = request.form.get("email")
         timestamp = datetime.now().isoformat()
-        with sqlite3.connect(DB_FILE) as conn:
-            conn.execute("INSERT INTO emails (timestamp, ip, email) VALUES (?, ?, ?)", (timestamp, client_ip, email))
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO emails (timestamp, ip, email) VALUES (%s, %s, %s)",
+                    (timestamp, client_ip, email)
+                )
+                conn.commit()
         user_data = user_limits.get(client_ip, {'date': datetime.now().strftime('%Y-%m-%d'), 'count': 0})
         user_data['email_provided'] = True
         user_limits[client_ip] = user_data
