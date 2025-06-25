@@ -4,6 +4,8 @@ from datetime import datetime
 from flask import Flask, render_template, request, send_file, redirect
 from PIL import Image
 import psycopg2
+import smtplib
+from email.message import EmailMessage
 
 app = Flask(__name__)
 UPLOAD_FOLDER = "uploads"
@@ -16,7 +18,7 @@ def get_db_connection():
     return psycopg2.connect(DATABASE_URL, sslmode='require')
 
 
-# Ensure emails table exists
+# Ensure the emails table exists
 with get_db_connection() as conn:
     with conn.cursor() as cur:
         cur.execute("""
@@ -29,7 +31,31 @@ with get_db_connection() as conn:
         """)
         conn.commit()
 
-# In-memory per-IP user limits
+# Notify admin when someone signs up
+def send_notification(email):
+    try:
+        smtp_user = os.environ.get("SMTP_USER")     # your Gmail address
+        smtp_pass = os.environ.get("SMTP_PASS")     # Gmail App Password
+
+        if not smtp_user or not smtp_pass:
+            print("SMTP credentials not set.")
+            return
+
+        msg = EmailMessage()
+        msg["Subject"] = "New File Converter Signup"
+        msg["From"] = smtp_user
+        msg["To"] = smtp_user
+        msg.set_content(f"New user signed up with email: {email}")
+
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+            server.login(smtp_user, smtp_pass)
+            server.send_message(msg)
+        print(f"✅ Email sent for {email}")
+    except Exception as e:
+        print(f"❌ Email failed: {e}")
+
+
+# Per-IP user limits
 user_limits = {}
 
 
@@ -92,6 +118,7 @@ def signup():
                             (timestamp, client_ip, email)
                         )
                         conn.commit()
+                send_notification(email)  # notify admin
                 user_data = user_limits.get(client_ip, {'date': datetime.now().strftime('%Y-%m-%d'), 'count': 0})
                 user_data['email_provided'] = True
                 user_limits[client_ip] = user_data
@@ -103,6 +130,10 @@ def signup():
 
 @app.route("/emails")
 def view_emails():
+    secret = request.args.get("admin")
+    if secret != "raysecret":
+        return "Access denied", 403
+
     try:
         with get_db_connection() as conn:
             with conn.cursor() as cur:
